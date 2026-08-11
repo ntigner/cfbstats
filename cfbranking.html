@@ -1,0 +1,1460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CFB Power Index</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg: #0a0a0c;
+    --surface: #111116;
+    --surface2: #18181f;
+    --border: #222230;
+    --accent: #3b82f6;
+    --accent2: #4af0a0;
+    --danger: #f05060;
+    --text: #e8e8f0;
+    --muted: #666680;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+    --display: 'Bebas Neue', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* GRID BACKGROUND */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(59,130,246,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(59,130,246,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  header {
+    position: relative;
+    z-index: 10;
+    padding: 32px 40px 0;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(59,130,246,0.04) 0%, transparent 100%);
+  }
+
+  .header-top {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding-bottom: 24px;
+  }
+
+  .logo-area h1 {
+    font-family: var(--display);
+    font-size: clamp(42px, 6vw, 72px);
+    letter-spacing: 2px;
+    color: var(--accent);
+    line-height: 0.9;
+  }
+
+  .logo-area p {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-top: 8px;
+  }
+
+  .season-badge {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 6px 14px;
+    letter-spacing: 2px;
+  }
+
+  /* CONTROLS */
+  .controls {
+    padding: 20px 40px;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    z-index: 10;
+  }
+
+  .year-select {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    cursor: pointer;
+    outline: none;
+    letter-spacing: 1px;
+  }
+
+  .year-select:focus { border-color: var(--accent); }
+
+  .btn {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 9px 20px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #0a0a0c;
+    font-weight: 600;
+  }
+
+  .btn-primary:hover { background: #f5d850; }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+
+  .btn-secondary:hover { border-color: var(--muted); color: var(--text); }
+  .btn-secondary.active { border-color: var(--accent); color: var(--accent); }
+
+  .search-box {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 14px;
+    width: 220px;
+    outline: none;
+    letter-spacing: 0.5px;
+  }
+
+  .search-box:focus { border-color: var(--accent); }
+  .search-box::placeholder { color: var(--muted); }
+
+  .conf-filter {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    cursor: pointer;
+    outline: none;
+  }
+
+  .conf-filter:focus { border-color: var(--accent); }
+
+  /* STATUS */
+  #status-bar {
+    padding: 12px 40px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: relative;
+    z-index: 10;
+    min-height: 40px;
+  }
+
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+
+  .status-dot.loading { background: var(--accent); animation: pulse 0.8s ease-in-out infinite alternate; }
+  .status-dot.done { background: var(--accent2); }
+  .status-dot.error { background: var(--danger); }
+
+  @keyframes pulse { from { opacity: 0.3; } to { opacity: 1; } }
+
+  /* LEGEND */
+  .legend {
+    padding: 16px 40px;
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    z-index: 10;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 1px;
+  }
+
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  /* TABLE */
+  .table-wrapper {
+    position: relative;
+    z-index: 10;
+    overflow-x: auto;
+    padding: 24px 40px 60px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+
+  thead th {
+    padding: 10px 12px;
+    text-align: left;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 5;
+  }
+
+  thead th:hover { color: var(--text); }
+  thead th.sorted { color: var(--accent); }
+
+  thead th .sort-arrow {
+    display: inline-block;
+    margin-left: 4px;
+    opacity: 0.5;
+    font-size: 9px;
+  }
+
+  thead th.sorted .sort-arrow { opacity: 1; }
+
+  tbody tr {
+    border-bottom: 1px solid rgba(34,34,48,0.5);
+    transition: background 0.1s;
+    cursor: default;
+  }
+
+  tbody tr:hover { background: var(--surface); }
+
+  tbody td {
+    padding: 11px 12px;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+
+  /* RANK COLUMN */
+  td.rank {
+    font-family: var(--display);
+    font-size: 20px;
+    color: var(--muted);
+    width: 50px;
+    letter-spacing: 1px;
+  }
+
+  tr:nth-child(-n+5) td.rank { color: var(--accent); }
+  tr:nth-child(-n+25) td.rank { color: var(--text); }
+
+  /* MOVE INDICATOR */
+  td.move {
+    width: 36px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  .move-up { color: var(--accent2); }
+  .move-down { color: var(--danger); }
+  .move-flat { color: var(--muted); }
+
+  /* TEAM COLUMN */
+  td.team-cell {
+    min-width: 200px;
+  }
+
+  .team-name {
+    font-family: var(--display);
+    font-size: 17px;
+    letter-spacing: 0.5px;
+    color: var(--text);
+    line-height: 1;
+  }
+
+  .team-conf {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  /* RECORD */
+  td.record {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  /* SCORE BAR */
+  .score-bar-cell { min-width: 160px; }
+
+  .score-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .score-val {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    width: 48px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .score-bar-bg {
+    flex: 1;
+    height: 4px;
+    background: var(--border);
+    position: relative;
+    min-width: 80px;
+  }
+
+  .score-bar-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.4s ease;
+  }
+
+  /* TIER BADGE */
+  .tier-badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    padding: 3px 8px;
+    border-radius: 2px;
+    text-transform: uppercase;
+  }
+
+  .tier-elite    { background: rgba(232,200,64,0.15); color: var(--accent); border: 1px solid rgba(232,200,64,0.3); }
+  .tier-top10    { background: rgba(232,200,64,0.08); color: #c8a820; border: 1px solid rgba(232,200,64,0.15); }
+  .tier-contender{ background: rgba(100,180,255,0.08); color: #80b8f0; border: 1px solid rgba(100,180,255,0.2); }
+  .tier-midmajor { background: rgba(180,180,200,0.06); color: var(--muted); border: 1px solid var(--border); }
+  .tier-fringe   { background: rgba(240,80,96,0.06); color: #c06070; border: 1px solid rgba(240,80,96,0.15); }
+
+  /* STAT COLUMNS */
+  td.stat {
+    text-align: right;
+    color: var(--text);
+  }
+
+  td.stat.positive { color: var(--accent2); }
+  td.stat.negative { color: var(--danger); }
+
+  td.stat-neutral { text-align: right; color: var(--muted); }
+
+  /* EMPTY STATE */
+  .empty-state {
+    text-align: center;
+    padding: 80px 20px;
+    color: var(--muted);
+  }
+
+  .empty-state h2 {
+    font-family: var(--display);
+    font-size: 40px;
+    letter-spacing: 2px;
+    margin-bottom: 12px;
+    color: var(--border);
+  }
+
+  .empty-state p {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 1px;
+  }
+
+  /* TOP BAR STATS */
+  .top-stats {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    z-index: 10;
+  }
+
+  .top-stat {
+    flex: 1;
+    padding: 16px 24px;
+    border-right: 1px solid var(--border);
+    min-width: 120px;
+  }
+
+  .top-stat:last-child { border-right: none; }
+
+  .top-stat-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .top-stat-value {
+    font-family: var(--display);
+    font-size: 26px;
+    letter-spacing: 1px;
+    color: var(--accent);
+    line-height: 1;
+  }
+
+  .top-stat-sub {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+
+  /* LOADING OVERLAY */
+  #loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+  }
+
+  #loading-overlay.hidden { display: none; }
+
+  .loading-title {
+    font-family: var(--display);
+    font-size: 60px;
+    letter-spacing: 4px;
+    color: var(--accent);
+    animation: flicker 2s ease-in-out infinite;
+  }
+
+  @keyframes flicker {
+    0%, 100% { opacity: 1; }
+    45% { opacity: 0.8; }
+    50% { opacity: 0.4; }
+    55% { opacity: 0.9; }
+  }
+
+  .loading-log {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    text-align: center;
+    max-width: 400px;
+    line-height: 1.8;
+    letter-spacing: 0.5px;
+  }
+
+  .loading-progress {
+    width: 300px;
+    height: 2px;
+    background: var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .loading-bar {
+    position: absolute;
+    left: -100%;
+    top: 0;
+    width: 60%;
+    height: 100%;
+    background: var(--accent);
+    animation: slide 1.2s ease-in-out infinite;
+  }
+
+  @keyframes slide {
+    from { left: -60%; }
+    to { left: 100%; }
+  }
+
+  /* TOOLTIP */
+  .tooltip-wrap { position: relative; display: inline-block; }
+
+  .tooltip-wrap:hover .tooltip { display: block; }
+
+  .tooltip {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text);
+    white-space: nowrap;
+    z-index: 100;
+    pointer-events: none;
+  }
+
+  /* ROW HIGHLIGHT TOP 25 */
+  tbody tr.top25 { background: rgba(232,200,64,0.02); }
+
+  /* DETAIL PANEL */
+  .detail-panel {
+    position: fixed;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 360px;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    z-index: 200;
+    overflow-y: auto;
+    transform: translateX(100%);
+    transition: transform 0.25s ease;
+    padding: 32px 28px;
+  }
+
+  .detail-panel.open { transform: translateX(0); }
+
+  .detail-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    cursor: pointer;
+    padding: 6px 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .detail-close:hover { border-color: var(--text); color: var(--text); }
+
+  .detail-rank {
+    font-family: var(--display);
+    font-size: 80px;
+    color: var(--border);
+    line-height: 0.9;
+    margin-bottom: 8px;
+    letter-spacing: 2px;
+  }
+
+  .detail-team {
+    font-family: var(--display);
+    font-size: 32px;
+    letter-spacing: 1px;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+
+  .detail-meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 28px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 20px;
+  }
+
+  .detail-section-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+    margin-top: 24px;
+  }
+
+  .detail-stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .detail-stat-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.5px;
+  }
+
+  .detail-stat-val {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .games-list {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+
+  .game-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 10px;
+    gap: 8px;
+  }
+
+  .game-item .opp { color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .game-item .score-text { white-space: nowrap; }
+  .game-item.win .score-text { color: var(--accent2); }
+  .game-item.loss .score-text { color: var(--danger); }
+
+  @media (max-width: 768px) {
+    header, .controls, .legend, .table-wrapper, #status-bar, .top-stats { padding-left: 16px; padding-right: 16px; }
+    .detail-panel { width: 100%; }
+    .top-stat { padding: 12px 16px; }
+  }
+
+  /* TABS */
+  .tab-row {
+    display: flex;
+    gap: 0;
+    margin-top: 24px;
+  }
+
+  .tab-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 14px 32px;
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    gap: 3px;
+    position: relative;
+    top: 1px;
+  }
+
+  .tab-btn:hover { background: rgba(232,200,64,0.04); }
+
+  .tab-btn.active {
+    border-bottom-color: var(--accent);
+    background: rgba(232,200,64,0.06);
+  }
+
+  .tab-season {
+    font-family: var(--display);
+    font-size: 22px;
+    letter-spacing: 1.5px;
+    color: var(--muted);
+    transition: color 0.15s;
+  }
+
+  .tab-btn.active .tab-season,
+  .tab-btn:hover .tab-season { color: var(--accent); }
+
+  .tab-sub {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .tab-btn.active .tab-sub { color: rgba(232,200,64,0.6); }
+</style>
+</head>
+<body>
+
+<!-- LOADING OVERLAY -->
+<div id="loading-overlay" style="display:none">
+  <div class="loading-title">CFB INDEX</div>
+  <div class="loading-progress"><div class="loading-bar"></div></div>
+  <div class="loading-log" id="loading-log">Fetching data...</div>
+</div>
+
+<!-- DETAIL PANEL -->
+<div class="detail-panel" id="detail-panel">
+  <button class="detail-close" onclick="closeDetail()">✕ CLOSE</button>
+  <div id="detail-content"></div>
+</div>
+
+<header>
+  <div class="header-top">
+    <div class="logo-area">
+      <h1>TIGNER POWER INDEX</h1>
+      <p>TPI: Algorithmic Rankings · No Polls · No Bias</p>
+    </div>
+  </div>
+  <div class="tab-row">
+    <button class="tab-btn active" id="tab-2025" onclick="switchTab(2025)">
+      <span class="tab-season">2025 SEASON</span>
+      <span class="tab-sub">Last Season · Final Rankings</span>
+    </button>
+    <button class="tab-btn" id="tab-2026" onclick="switchTab(2026)">
+      <span class="tab-season">2026 SEASON</span>
+      <span class="tab-sub">Upcoming · Aug 2026</span>
+    </button>
+  </div>
+</header>
+
+<!-- TOP STATS -->
+<div class="top-stats" id="top-stats-bar" style="display:none">
+  <div class="top-stat">
+    <div class="top-stat-label">Teams Ranked</div>
+    <div class="top-stat-value" id="ts-teams">—</div>
+    <div class="top-stat-sub">FBS Programs</div>
+  </div>
+  <div class="top-stat">
+    <div class="top-stat-label">#1 Team</div>
+    <div class="top-stat-value" id="ts-one" style="font-size:18px;padding-top:4px">—</div>
+    <div class="top-stat-sub" id="ts-one-score">—</div>
+  </div>
+  <div class="top-stat">
+    <div class="top-stat-label">Avg Score</div>
+    <div class="top-stat-value" id="ts-avg">—</div>
+    <div class="top-stat-sub">Power Index Pts</div>
+  </div>
+  <div class="top-stat">
+    <div class="top-stat-label">Games Analyzed</div>
+    <div class="top-stat-value" id="ts-games">—</div>
+    <div class="top-stat-sub">Regular + Post</div>
+  </div>
+</div>
+
+<!-- CONTROLS -->
+<div class="controls" id="controls-bar">
+  <button class="btn btn-primary" id="load-btn" onclick="loadData()">▶ CALCULATE RANKINGS</button>
+  <input type="text" class="search-box" id="search-box" placeholder="Search team..." oninput="filterTable()" />
+  <select class="conf-filter" id="conf-filter" onchange="filterTable()">
+    <option value="">All Conferences</option>
+  </select>
+  <button class="btn btn-secondary" id="toggle-fbs" onclick="toggleFBSOnly()">FBS Only</button>
+</div>
+
+<!-- STATUS -->
+<div id="status-bar">
+  <div class="status-dot" id="status-dot"></div>
+  <span id="status-text">Select a year and click Calculate Rankings</span>
+</div>
+
+<!-- LEGEND -->
+<div class="legend" id="legend-bar" style="display:none">
+  <div class="legend-item"><div class="legend-dot" style="background:var(--accent)"></div> Built Different</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#c8a820"></div> Legit Good</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#80b8f0"></div> Meh</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--muted)"></div> Rough</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#c06070"></div> Dumpster Fire</div>
+  <div class="legend-item" style="margin-left:auto">
+    <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">CLICK ANY ROW FOR TEAM DETAIL</span>
+  </div>
+</div>
+
+<!-- TABLE -->
+<div class="table-wrapper">
+  <div id="table-container">
+    <div class="empty-state">
+      <h2>NO DATA</h2>
+      <p>SELECT A SEASON AND HIT CALCULATE</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_KEY = '/vXwEFXXuT+s7/FQxXXs6oIKyeS1eawxMzXRcBSl1S9Nxg+JfwbuITmkb3K1awgj';
+const BASE = 'https://api.collegefootballdata.com';
+
+let allTeamData = [];
+let currentSort = { col: 'piScore', dir: 'desc' };
+let fbsOnly = false;
+let currentDetail = null;
+let activeTab = 2025;
+let dataCache = {}; // cache loaded data per tab so switching doesn't re-fetch
+
+function switchTab(year) {
+  activeTab = year;
+  document.getElementById('tab-2025').classList.toggle('active', year === 2025);
+  document.getElementById('tab-2026').classList.toggle('active', year === 2026);
+  closeDetail();
+
+  if (year === 2026) {
+    // 2026 season hasn't started — show preseason placeholder
+    document.getElementById('controls-bar').style.display = 'none';
+    document.getElementById('top-stats-bar').style.display = 'none';
+    document.getElementById('legend-bar').style.display = 'none';
+    setStatus('2026 season has not started yet', '');
+    document.getElementById('table-container').innerHTML = `
+      <div class="empty-state">
+        <h2>2026 SEASON</h2>
+        <p style="margin-bottom:16px">THE SEASON KICKS OFF IN LATE AUGUST 2026.</p>
+        <p style="font-size:10px;color:var(--border)">CHECK BACK ONCE GAMES ARE BEING PLAYED —<br>RANKINGS WILL CALCULATE AUTOMATICALLY.</p>
+      </div>`;
+    return;
+  }
+
+  // 2025 tab
+  document.getElementById('controls-bar').style.display = 'flex';
+  if (dataCache[2025]) {
+    // already loaded — restore from cache
+    allTeamData = dataCache[2025].rankings;
+    renderTable(allTeamData);
+    populateConfFilter(allTeamData);
+    updateTopStats(allTeamData, dataCache[2025].games);
+    document.getElementById('top-stats-bar').style.display = 'flex';
+    document.getElementById('legend-bar').style.display = 'flex';
+    setStatus(`Ranked ${allTeamData.length} FBS teams · 2025 season · ${dataCache[2025].games.length} games analyzed`, 'done');
+  } else {
+    allTeamData = [];
+    document.getElementById('top-stats-bar').style.display = 'none';
+    document.getElementById('legend-bar').style.display = 'none';
+    document.getElementById('table-container').innerHTML = `
+      <div class="empty-state"><h2>NO DATA</h2><p>CLICK CALCULATE RANKINGS TO LOAD THE 2025 SEASON</p></div>`;
+    setStatus('Click Calculate Rankings to load 2025 data', '');
+  }
+}
+
+function log(msg) {
+  document.getElementById('loading-log').textContent = msg;
+}
+
+function setStatus(msg, state = '') {
+  document.getElementById('status-text').textContent = msg;
+  const dot = document.getElementById('status-dot');
+  dot.className = 'status-dot' + (state ? ' ' + state : '');
+}
+
+async function apiFetch(path) {
+  const r = await fetch(`${BASE}${path}`, {
+    headers: { 'Authorization': `Bearer ${API_KEY}` }
+  });
+  if (!r.ok) throw new Error(`API error ${r.status}: ${path}`);
+  return r.json();
+}
+
+function showOverlay() { document.getElementById('loading-overlay').style.display = 'flex'; }
+function hideOverlay() { document.getElementById('loading-overlay').style.display = 'none'; }
+
+async function loadData() {
+  const year = activeTab; // always 2025 when this button is visible
+  const btn = document.getElementById('load-btn');
+  btn.disabled = true;
+  showOverlay();
+
+  try {
+    log('Fetching FBS team list...');
+    setStatus('Loading team list...', 'loading');
+    const fbsTeamsRaw = await apiFetch(`/teams?classification=fbs`);
+
+    if (!fbsTeamsRaw || !fbsTeamsRaw.length) throw new Error('No FBS teams returned. Check your API key.');
+
+    // Only include teams the API itself classifies as FBS
+    // Also enforce the known FBS conferences as a second filter
+    const FBS_CONFERENCES = new Set([
+      'American Athletic', 'ACC', 'Big 12', 'Big Ten',
+      'Conference USA', 'FBS Independents', 'Mid-American',
+      'Mountain West', 'Pac-12', 'SEC', 'Sun Belt'
+    ]);
+
+    const fbsTeams = fbsTeamsRaw.filter(t =>
+      t.classification === 'fbs' && FBS_CONFERENCES.has(t.conference)
+    );
+
+    console.log(`[CFB DEBUG] FBS teams after dual filter: ${fbsTeams.length}`);
+    console.log(`[CFB DEBUG] Conferences present:`, [...new Set(fbsTeams.map(t => t.conference))].sort());
+
+    const teamMap = {};
+    fbsTeams.forEach(t => { teamMap[t.school] = { ...t, isFBS: true }; });
+
+    log('Fetching regular season games...');
+    setStatus('Loading game results...', 'loading');
+    const regularGamesRaw = await apiFetch(`/games?year=${year}&seasonType=regular`);
+
+    log('Fetching postseason games...');
+    const postGamesRaw = await apiFetch(`/games?year=${year}&seasonType=postseason`).catch(() => []);
+
+    // Normalize field names — REST API may return camelCase or snake_case depending on version
+    const normalizeGame = g => ({
+      home_team:            g.home_team            ?? g.homeTeam,
+      away_team:            g.away_team            ?? g.awayTeam,
+      home_points:          g.home_points          ?? g.homePoints,
+      away_points:          g.away_points          ?? g.awayPoints,
+      home_classification:  g.home_classification  ?? g.homeClassification,
+      away_classification:  g.away_classification  ?? g.awayClassification,
+    });
+
+    // Only keep completed games where at least one side is a whitelisted FBS team
+    const fbsSchools = new Set(fbsTeams.map(t => t.school));
+
+    const allRaw = [...regularGamesRaw, ...(postGamesRaw || [])].map(normalizeGame);
+
+    // Debug: log a sample game so we can see what fields came back
+    if (allRaw.length > 0) {
+      console.log('[CFB DEBUG] Raw game sample (first):', [...regularGamesRaw, ...(postGamesRaw||[])][0]);
+      console.log('[CFB DEBUG] Normalized sample:', allRaw[0]);
+    }
+
+    // Only keep completed games where at least one side is FBS
+    const games = allRaw.filter(g =>
+      g.home_points !== null && g.home_points !== undefined &&
+      g.away_points !== null && g.away_points !== undefined &&
+      (fbsSchools.has(g.home_team) || fbsSchools.has(g.away_team))
+    );
+
+    console.log(`[CFB DEBUG] Total raw games: ${allRaw.length}, completed FBS games: ${games.length}`);
+
+    if (!games.length) throw new Error(`No completed games found for ${year}. The season may not have data yet.`);
+
+    log('Fetching team stats...');
+    setStatus('Loading stats...', 'loading');
+    const statsData = await apiFetch(`/stats/season?year=${year}&seasonType=both`).catch(() => []);
+
+    log('Fetching advanced stats...');
+    const advStats = await apiFetch(`/stats/season/advanced?year=${year}&excludeGarbageTime=true`).catch(() => []);
+
+    log('Fetching SP+ ratings...');
+    const spRatings = await apiFetch(`/ratings/sp?year=${year}`).catch(() => []);
+
+    log('Computing power rankings...');
+    setStatus('Computing rankings...', 'loading');
+    console.log(`[CFB DEBUG] FBS teams: ${fbsTeams.length}, games with scores: ${games.length}`);
+    const rankings = computeRankings(games, fbsTeams, statsData, advStats, spRatings, teamMap, year);
+
+    // Cache so switching tabs and back doesn't re-fetch
+    dataCache[year] = { rankings, games };
+
+    allTeamData = rankings;
+    renderTable(rankings);
+    populateConfFilter(rankings);
+    updateTopStats(rankings, games);
+
+    document.getElementById('top-stats-bar').style.display = 'flex';
+    document.getElementById('legend-bar').style.display = 'flex';
+    setStatus(`Ranked ${rankings.length} FBS teams · ${year} season · ${games.length} games analyzed`, 'done');
+
+  } catch (err) {
+    console.error(err);
+    setStatus('Error: ' + err.message, 'error');
+    document.getElementById('table-container').innerHTML = `
+      <div class="empty-state">
+        <h2>ERROR</h2>
+        <p style="color:var(--danger);font-family:var(--mono);font-size:12px;margin-top:8px">${err.message}</p>
+        <p style="margin-top:16px;font-family:var(--mono);font-size:11px;color:var(--muted)">Open browser DevTools (F12) → Console for more detail.</p>
+      </div>`;
+  }
+
+  hideOverlay();
+  btn.disabled = false;
+}
+
+/* ============================================================
+   RANKING ALGORITHM
+   ============================================================
+
+   Components (weights sum to 100%):
+   1. Win-loss record (15%) — raw W/L ratio with game count bonus
+   2. Strength-adjusted record (35%) — each W/L weighted by opponent strength
+   3. Scoring margin adjusted (15%) — PPG - OppPPG, capped to prevent blowout farming
+   4. Offensive efficiency (10%) — points per drive / yards per play concepts
+   5. Defensive efficiency (10%) — opponent PPG and yards allowed
+   6. Consistency / close-game performance (5%) — performance in <7pt games
+   7. Schedule strength (10%) — average opponent composite rating
+
+   Opponent strength is computed iteratively (3 passes) so that
+   beating a team that beat good teams is worth more than beating
+   a team that stomped cupcakes.
+*/
+function computeRankings(games, fbsTeams, statsData, advStats, spRatings, teamMap, year) {
+  const fbsSet = new Set(fbsTeams.map(t => t.school));
+
+  // Build team game records — only for FBS teams
+  const teamGames = {};
+  fbsTeams.forEach(t => {
+    teamGames[t.school] = { wins: [], losses: [], pointsFor: 0, pointsAgainst: 0, games: [], closeWins: 0, closeLosses: 0, closeGames: 0 };
+  });
+
+  games.forEach(g => {
+    const home = g.home_team, away = g.away_team;
+    const hp = g.home_points, ap = g.away_points;
+    if (hp === null || hp === undefined || ap === null || ap === undefined) return;
+    const margin = Math.abs(hp - ap);
+    const isClose = margin <= 7;
+
+    // Only record game results for FBS teams
+    if (teamGames[home]) {
+      const win = hp > ap;
+      teamGames[home].games.push({ opp: away, pf: hp, pa: ap, win, oppIsFBS: fbsSet.has(away) });
+      teamGames[home].pointsFor += hp;
+      teamGames[home].pointsAgainst += ap;
+      if (win) { teamGames[home].wins.push(away); if (isClose) teamGames[home].closeWins++; }
+      else { teamGames[home].losses.push(away); if (isClose) teamGames[home].closeLosses++; }
+      if (isClose) teamGames[home].closeGames++;
+    }
+
+    if (teamGames[away]) {
+      const win = ap > hp;
+      teamGames[away].games.push({ opp: home, pf: ap, pa: hp, win, oppIsFBS: fbsSet.has(home) });
+      teamGames[away].pointsFor += ap;
+      teamGames[away].pointsAgainst += hp;
+      if (win) { teamGames[away].wins.push(home); if (isClose) teamGames[away].closeWins++; }
+      else { teamGames[away].losses.push(home); if (isClose) teamGames[away].closeLosses++; }
+      if (isClose) teamGames[away].closeGames++;
+    }
+  });
+
+  // Debug: check a known team
+  const sample = fbsTeams[0]?.school;
+  if (sample) console.log(`[CFB DEBUG] Sample team "${sample}":`, teamGames[sample]);
+
+  // Build stats lookup
+  const statLookup = {};
+  statsData.forEach(s => {
+    if (!statLookup[s.team]) statLookup[s.team] = {};
+    statLookup[s.team][s.statName] = s.statValue;
+  });
+
+  const advLookup = {};
+  advStats.forEach(s => {
+    if (!advLookup[s.team]) advLookup[s.team] = {};
+    Object.assign(advLookup[s.team], s);
+  });
+
+  const spLookup = {};
+  spRatings.forEach(s => { spLookup[s.team] = s; });
+
+  // PASS 1: raw win pct (FBS teams only)
+  const rawWinPct = {};
+  fbsTeams.forEach(t => {
+    const tg = teamGames[t.school];
+    const total = tg.wins.length + tg.losses.length;
+    rawWinPct[t.school] = total > 0 ? tg.wins.length / total : 0.5;
+  });
+
+  // FCS opponents get a fixed low strength rating so they count but don't inflate SOS
+  const FCS_STRENGTH = 0.25;
+
+  // PASS 2: opponent-adjusted win pct (iterate 3x)
+  // FCS opponents use FCS_STRENGTH constant; FBS opponents use their computed value
+  let oppAdjWinPct = { ...rawWinPct };
+  for (let iter = 0; iter < 3; iter++) {
+    const newPct = {};
+    fbsTeams.forEach(t => {
+      const tg = teamGames[t.school];
+      let weightedWins = 0, weightedLosses = 0;
+
+      tg.wins.forEach(opp => {
+        const oppStr = fbsSet.has(opp) ? (oppAdjWinPct[opp] ?? 0.4) : FCS_STRENGTH;
+        weightedWins += 0.5 + oppStr * 0.5;
+      });
+
+      tg.losses.forEach(opp => {
+        const oppStr = fbsSet.has(opp) ? (oppAdjWinPct[opp] ?? 0.4) : FCS_STRENGTH;
+        weightedLosses += 1.2 - oppStr * 0.8;
+      });
+
+      const total = weightedWins + weightedLosses;
+      newPct[t.school] = total > 0 ? weightedWins / total : 0.5;
+    });
+    oppAdjWinPct = newPct;
+  }
+
+  // Schedule strength — FCS opponents penalized with low fixed value
+  const schedStr = {};
+  fbsTeams.forEach(t => {
+    const tg = teamGames[t.school];
+    const opps = [...tg.wins, ...tg.losses];
+    if (opps.length === 0) { schedStr[t.school] = 0.5; return; }
+    const avg = opps.reduce((s, o) => s + (fbsSet.has(o) ? (oppAdjWinPct[o] ?? 0.4) : FCS_STRENGTH), 0) / opps.length;
+    schedStr[t.school] = avg;
+  });
+
+  // Normalize a value 0-1 within an array
+  function normalize(vals, key) {
+    const arr = vals.map(v => v[key]).filter(x => isFinite(x));
+    if (!arr.length) return;
+    const min = Math.min(...arr), max = Math.max(...arr);
+    const range = max - min || 1;
+    vals.forEach(v => { v[key + '_norm'] = isFinite(v[key]) ? (v[key] - min) / range : 0.5; });
+  }
+
+  // Build team objects
+  const teams = fbsTeams.map(t => {
+    const name = t.school;
+    const tg = teamGames[name] || { wins: [], losses: [], pointsFor: 0, pointsAgainst: 0, games: [], closeWins: 0, closeLosses: 0, closeGames: 0 };
+    const totalGames = tg.wins.length + tg.losses.length;
+    const st = statLookup[name] || {};
+    const av = advLookup[name] || {};
+    const sp = spLookup[name] || {};
+
+    const ppg = totalGames > 0 ? tg.pointsFor / totalGames : 0;
+    const oppPpg = totalGames > 0 ? tg.pointsAgainst / totalGames : 0;
+    const marginPerGame = ppg - oppPpg;
+    const cappedMargin = Math.max(-20, Math.min(20, marginPerGame));
+
+    const closeWinPct = tg.closeGames > 0 ? tg.closeWins / tg.closeGames : 0.5;
+
+    // Combined W-L record of teams this team BEAT (FBS opponents only)
+    let oppWins = 0, oppLosses = 0;
+    tg.wins.forEach(opp => {
+      if (fbsSet.has(opp) && teamGames[opp]) {
+        oppWins   += teamGames[opp].wins.length;
+        oppLosses += teamGames[opp].losses.length;
+      }
+    });
+
+    return {
+      name,
+      conference: t.conference || 'Independent',
+      isFBS: true,
+      wins: tg.wins.length,
+      losses: tg.losses.length,
+      totalGames,
+      ppg,
+      oppPpg,
+      marginPerGame,
+      cappedMargin,
+      closeWinPct,
+      closeWins: tg.closeWins,
+      closeLosses: tg.closeLosses,
+      closeGames: tg.closeGames,
+      winPct: rawWinPct[name],
+      oppAdjWinPct: oppAdjWinPct[name],
+      schedStr: schedStr[name],
+      oppWins,
+      oppLosses,
+      games: tg.games,
+      spRating: sp.rating ?? null,
+      rawRecord: 0,
+      rawAdjRecord: 0,
+      rawMargin: 0,
+      rawSched: 0,
+      rawClose: 0,
+      rawOffense: 0,
+      rawDefense: 0,
+    };
+  });
+
+  // Normalize components
+  teams.forEach(t => {
+    t.rawRecord    = t.winPct;
+    t.rawAdjRecord = t.oppAdjWinPct;
+    t.rawMargin    = t.cappedMargin;
+    t.rawSched     = t.schedStr;
+    t.rawClose     = t.closeWinPct;
+    t.rawOffense   = t.ppg;
+    t.rawDefense   = -t.oppPpg;
+  });
+
+  normalize(teams, 'rawRecord');
+  normalize(teams, 'rawAdjRecord');
+  normalize(teams, 'rawMargin');
+  normalize(teams, 'rawSched');
+  normalize(teams, 'rawClose');
+  normalize(teams, 'rawOffense');
+  normalize(teams, 'rawDefense');
+
+  // Weighted composite
+  const W = {
+    record:    0.15,
+    adjRecord: 0.35,
+    margin:    0.15,
+    offense:   0.10,
+    defense:   0.10,
+    close:     0.05,
+    sched:     0.10,
+  };
+
+  teams.forEach(t => {
+    // Penalize teams with very few games (bowl eligibility safety valve)
+    const gameFactor = Math.min(1, t.totalGames / 10);
+
+    t.piScore = (
+      t.rawRecord_norm    * W.record +
+      t.rawAdjRecord_norm * W.adjRecord +
+      t.rawMargin_norm    * W.margin +
+      t.rawOffense_norm   * W.offense +
+      t.rawDefense_norm   * W.defense +
+      t.rawClose_norm     * W.close +
+      t.rawSched_norm     * W.sched
+    ) * gameFactor * 1000;
+
+    // Round to 1 decimal
+    t.piScore = Math.round(t.piScore * 10) / 10;
+  });
+
+  // Sort by piScore desc
+  teams.sort((a, b) => b.piScore - a.piScore);
+
+  console.log(`[CFB DEBUG] Final ranked teams: ${teams.length}. Top 5: ${teams.slice(0,5).map(t => `${t.name} (${t.wins}-${t.losses}, ${t.piScore})`).join(', ')}`);
+
+  // Assign rank and tier
+  teams.forEach((t, i) => {
+    t.rank = i + 1;
+    if (i < 10) t.tier = 'elite';
+    else if (i < 25) t.tier = 'top10';
+    else if (i < 45) t.tier = 'contender';
+    else if (i < 75) t.tier = 'midmajor';
+    else t.tier = 'fringe';
+  });
+
+  return teams;
+}
+
+function tierLabel(tier) {
+  const labels = { elite: 'BUILT DIFFERENT', top10: 'LEGIT GOOD', contender: 'MEH', midmajor: 'ROUGH', fringe: 'DUMPSTER FIRE' };
+  return labels[tier] || tier;
+}
+
+function renderTable(data) {
+  const filtered = getFiltered(data);
+  const maxScore = data[0]?.piScore || 1;
+
+  if (!filtered.length) {
+    document.getElementById('table-container').innerHTML = `
+      <div class="empty-state"><h2>NO RESULTS</h2><p>NO TEAMS MATCH YOUR FILTERS</p></div>`;
+    return;
+  }
+
+  const arrow = (col) => {
+    if (currentSort.col !== col) return '<span class="sort-arrow">↕</span>';
+    return `<span class="sort-arrow">${currentSort.dir === 'desc' ? '↓' : '↑'}</span>`;
+  };
+
+  const th = (col, label, right = false) =>
+    `<th onclick="sortBy('${col}')" class="${currentSort.col === col ? 'sorted' : ''}" style="${right ? 'text-align:right' : ''}">${label}${arrow(col)}</th>`;
+
+  let html = `
+  <table>
+    <thead>
+      <tr>
+        ${th('rank', 'RK')}
+        <th></th>
+        ${th('name', 'TEAM')}
+        ${th('wins', 'W-L')}
+        ${th('piScore', 'POWER INDEX', true)}
+        ${th('oppWins', 'WINS OPP REC', true)}
+        ${th('ppg', 'PPG', true)}
+        ${th('oppPpg', 'OPP PPG', true)}
+        ${th('marginPerGame', 'MARGIN', true)}
+        ${th('schedStr', 'SOS', true)}
+        ${th('closeWinPct', 'CLOSE', true)}
+        <th style="text-align:center">TIER</th>
+      </tr>
+    </thead>
+    <tbody>`;
+
+  filtered.forEach(t => {
+    const top25class = t.rank <= 25 ? ' top25' : '';
+    const wl = `${t.wins}-${t.losses}`;
+    const barWidth = ((t.piScore / maxScore) * 100).toFixed(1);
+    const sos = (t.schedStr * 100).toFixed(1);
+    const closeRecord = t.closeGames > 0 ? `${t.closeWins}-${t.closeLosses}` : '—';
+    const oppRec = (t.oppWins + t.oppLosses) > 0 ? `${t.oppWins}-${t.oppLosses}` : '—';
+    const oppRecPct = (t.oppWins + t.oppLosses) > 0 ? t.oppWins / (t.oppWins + t.oppLosses) : 0;
+    const oppRecColor = oppRecPct >= 0.55 ? 'positive' : oppRecPct <= 0.40 ? 'negative' : '';
+    const marginColor = t.marginPerGame >= 0 ? 'positive' : 'negative';
+
+    html += `
+    <tr class="${top25class}" onclick="openDetail('${t.name.replace(/'/g, "\\'")}')">
+      <td class="rank">${t.rank}</td>
+      <td class="move"></td>
+      <td class="team-cell">
+        <div class="team-name">${t.name}</div>
+        <div class="team-conf">${t.conference}</div>
+      </td>
+      <td class="record">${wl}</td>
+      <td class="score-bar-cell">
+        <div class="score-bar-wrap">
+          <div class="score-val">${t.piScore}</div>
+          <div class="score-bar-bg"><div class="score-bar-fill" style="width:${barWidth}%"></div></div>
+        </div>
+      </td>
+      <td class="stat ${oppRecColor}" style="text-align:right">${oppRec}</td>
+      <td class="stat">${t.ppg.toFixed(1)}</td>
+      <td class="stat">${t.oppPpg.toFixed(1)}</td>
+      <td class="stat ${marginColor}">${t.marginPerGame >= 0 ? '+' : ''}${t.marginPerGame.toFixed(1)}</td>
+      <td class="stat-neutral">${sos}</td>
+      <td class="stat-neutral">${closeRecord}</td>
+      <td style="text-align:center"><span class="tier-badge tier-${t.tier}">${tierLabel(t.tier)}</span></td>
+    </tr>`;
+  });
+
+  html += '</tbody></table>';
+  document.getElementById('table-container').innerHTML = html;
+}
+
+function getFiltered(data) {
+  const search = document.getElementById('search-box').value.toLowerCase().trim();
+  const conf = document.getElementById('conf-filter').value;
+  let arr = [...(data || allTeamData)];
+
+  if (fbsOnly) arr = arr.filter(t => t.isFBS);
+  if (search) arr = arr.filter(t => t.name.toLowerCase().includes(search) || t.conference.toLowerCase().includes(search));
+  if (conf) arr = arr.filter(t => t.conference === conf);
+
+  // Apply sort
+  arr.sort((a, b) => {
+    let av = a[currentSort.col], bv = b[currentSort.col];
+    if (typeof av === 'string') return currentSort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    return currentSort.dir === 'asc' ? av - bv : bv - av;
+  });
+
+  return arr;
+}
+
+function sortBy(col) {
+  if (currentSort.col === col) {
+    currentSort.dir = currentSort.dir === 'desc' ? 'asc' : 'desc';
+  } else {
+    currentSort.col = col;
+    currentSort.dir = col === 'oppPpg' ? 'asc' : 'desc';
+  }
+  renderTable(allTeamData);
+}
+
+function filterTable() { renderTable(allTeamData); }
+
+function toggleFBSOnly() {
+  fbsOnly = !fbsOnly;
+  document.getElementById('toggle-fbs').classList.toggle('active', fbsOnly);
+  filterTable();
+}
+
+function populateConfFilter(data) {
+  const confs = [...new Set(data.map(t => t.conference))].sort();
+  const sel = document.getElementById('conf-filter');
+  sel.innerHTML = '<option value="">All Conferences</option>' +
+    confs.map(c => `<option value="${c}">${c}</option>`).join('');
+}
+
+function updateTopStats(rankings, games) {
+  document.getElementById('ts-teams').textContent = rankings.length;
+  document.getElementById('ts-one').textContent = rankings[0]?.name || '—';
+  document.getElementById('ts-one-score').textContent = `PI Score: ${rankings[0]?.piScore || '—'}`;
+  const avg = rankings.reduce((s, t) => s + t.piScore, 0) / rankings.length;
+  document.getElementById('ts-avg').textContent = avg.toFixed(0);
+  document.getElementById('ts-games').textContent = games.length;
+}
+
+function openDetail(teamName) {
+  const t = allTeamData.find(x => x.name === teamName);
+  if (!t) return;
+
+  const wl = `${t.wins}-${t.losses}`;
+  const sortedGames = [...t.games].sort((a, b) => {
+    if (a.win && !b.win) return -1;
+    if (!a.win && b.win) return 1;
+    return (b.pf - b.pa) - (a.pf - a.pa);
+  });
+
+  const gameRows = sortedGames.map(g => {
+    const result = g.win ? 'W' : 'L';
+    const score = `${result} ${g.pf}-${g.pa}`;
+    return `<div class="game-item ${g.win ? 'win' : 'loss'}">
+      <span class="opp">vs ${g.opp}</span>
+      <span class="score-text">${score}</span>
+    </div>`;
+  }).join('');
+
+  document.getElementById('detail-content').innerHTML = `
+    <div class="detail-rank">#${t.rank}</div>
+    <div class="detail-team">${t.name}</div>
+    <div class="detail-meta">${t.conference} · ${wl} · <span class="tier-badge tier-${t.tier}">${tierLabel(t.tier)}</span></div>
+
+    <div class="detail-section-title">Power Index Breakdown</div>
+    <div class="detail-stat-row"><span class="detail-stat-label">PI Score</span><span class="detail-stat-val" style="color:var(--accent)">${t.piScore}</span></div>
+    <div class="detail-stat-row"><span class="detail-stat-label">Record</span><span class="detail-stat-val">${wl}</span></div>
+    <div class="detail-stat-row"><span class="detail-stat-label">Win %</span><span class="detail-stat-val">${(t.winPct * 100).toFixed(1)}%</span></div>
+    <div class="detail-stat-row"><span class="detail-stat-label">Adj. Win % (SOS-weighted)</span><span class="detail-stat-val">${(t.oppAdjWinPct * 100).toFixed(1)}%</span></div>
+    <div class="detail-stat-row"><span class="detail-stat-label">Schedule Strength</span><span class="detail-stat-val">${(t.schedStr * 100).toFixed(1)}</span></div>
+    <div class="detail-stat-row"><span class="detail-stat-label">Wins Opp Record</span><span class="detail-stat-val">${t.oppWins}-${t.oppLosses}</span></div>
+
+    <div class="detail-section-title">Scoring</div>
+    <div class="detail-stat-row"><span class="detail-stat-label">Points Per Game</span><span class="detail-stat-val">${t.ppg.toFixed(1)}</span></div>
+    <div class="detail-stat-row"><span class="detail-stat-label">Opp Points Per Game</span><span class="detail-stat-val">${t.oppPpg.toFixed(1)}</span></div>
+    <div class="detail-stat-row"><span class="detail-stat-label">Scoring Margin</span><span class="detail-stat-val" style="color:${t.marginPerGame >= 0 ? 'var(--accent2)' : 'var(--danger)'}">${t.marginPerGame >= 0 ? '+' : ''}${t.marginPerGame.toFixed(1)}</span></div>
+
+    <div class="detail-section-title">Close Games (≤7 pts)</div>
+    <div class="detail-stat-row"><span class="detail-stat-label">Close Game Record</span><span class="detail-stat-val">${t.closeWins}-${t.closeLosses}</span></div>
+    <div class="detail-stat-row"><span class="detail-stat-label">Close Win %</span><span class="detail-stat-val">${t.closeGames > 0 ? (t.closeWinPct * 100).toFixed(0) + '%' : 'N/A'}</span></div>
+
+    <div class="detail-section-title">Game Log</div>
+    <div class="games-list">${gameRows || '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);padding:8px">No games found</div>'}</div>
+  `;
+
+  document.getElementById('detail-panel').classList.add('open');
+  currentDetail = teamName;
+}
+
+function closeDetail() {
+  document.getElementById('detail-panel').classList.remove('open');
+  currentDetail = null;
+}
+
+// Close panel on ESC
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
+</script>
+</body>
+</html>
