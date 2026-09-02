@@ -750,13 +750,13 @@
     </div>
   </div>
   <div class="tab-row">
-    <button class="tab-btn active" id="tab-2025" onclick="switchTab(2025)">
+    <button class="tab-btn" id="tab-2025" onclick="switchTab(2025)">
       <span class="tab-season">2025 SEASON</span>
       <span class="tab-sub">Last Season · Final Rankings</span>
     </button>
-    <button class="tab-btn" id="tab-2026" onclick="switchTab(2026)">
+    <button class="tab-btn active" id="tab-2026" onclick="switchTab(2026)">
       <span class="tab-season">2026 SEASON</span>
-      <span class="tab-sub">Upcoming · Aug 2026</span>
+      <span class="tab-sub">Current Season · Live</span>
     </button>
   </div>
 </header>
@@ -831,7 +831,8 @@ let allTeamData = [];
 let currentSort = { col: 'piScore', dir: 'desc' };
 let fbsOnly = false;
 let currentDetail = null;
-let activeTab = 2025;
+const CURRENT_SEASON = 2026;
+let activeTab = CURRENT_SEASON;
 let dataCache = {}; // cache loaded data per tab so switching doesn't re-fetch
 
 function switchTab(year) {
@@ -840,40 +841,34 @@ function switchTab(year) {
   document.getElementById('tab-2026').classList.toggle('active', year === 2026);
   closeDetail();
 
-  if (year === 2026) {
-    // 2026 season hasn't started — show preseason placeholder
-    document.getElementById('controls-bar').style.display = 'none';
-    document.getElementById('top-stats-bar').style.display = 'none';
-    document.getElementById('legend-bar').style.display = 'none';
-    setStatus('2026 season has not started yet', '');
-    document.getElementById('table-container').innerHTML = `
-      <div class="empty-state">
-        <h2>2026 SEASON</h2>
-        <p style="margin-bottom:16px">THE SEASON KICKS OFF IN LATE AUGUST 2026.</p>
-        <p style="font-size:10px;color:var(--border)">CHECK BACK ONCE GAMES ARE BEING PLAYED —<br>RANKINGS WILL CALCULATE AUTOMATICALLY.</p>
-      </div>`;
-    return;
-  }
-
-  // 2025 tab
   document.getElementById('controls-bar').style.display = 'flex';
-  if (dataCache[2025]) {
+
+  if (dataCache[year]) {
     // already loaded — restore from cache
-    allTeamData = dataCache[2025].rankings;
+    allTeamData = dataCache[year].rankings;
     renderTable(allTeamData);
     populateConfFilter(allTeamData);
-    updateTopStats(allTeamData, dataCache[2025].games);
+    updateTopStats(allTeamData, dataCache[year].games);
     document.getElementById('top-stats-bar').style.display = 'flex';
     document.getElementById('legend-bar').style.display = 'flex';
-    setStatus(`Ranked ${allTeamData.length} FBS teams · 2025 season · ${dataCache[2025].games.length} games analyzed`, 'done');
+    setStatus(statusLine(year, allTeamData, dataCache[year].games), 'done');
   } else {
     allTeamData = [];
     document.getElementById('top-stats-bar').style.display = 'none';
     document.getElementById('legend-bar').style.display = 'none';
     document.getElementById('table-container').innerHTML = `
-      <div class="empty-state"><h2>NO DATA</h2><p>CLICK CALCULATE RANKINGS TO LOAD THE 2025 SEASON</p></div>`;
-    setStatus('Click Calculate Rankings to load 2025 data', '');
+      <div class="empty-state"><h2>NO DATA</h2><p>CLICK CALCULATE RANKINGS TO LOAD THE ${year} SEASON</p></div>`;
+    setStatus(`Click Calculate Rankings to load ${year} data`, '');
+    loadData();
   }
+}
+
+function statusLine(year, rankings, games) {
+  const pending = rankings.unplayedCount || 0;
+  const wks = Math.max(...rankings.map(t => t.totalGames), 0);
+  return `Ranked ${rankings.length} FBS teams · ${year} season · ${games.length} games analyzed`
+    + (pending ? ` · ${pending} teams unranked until they play` : '')
+    + (wks > 0 && wks < 4 ? ` · small sample, ${wks} game${wks > 1 ? 's' : ''} in` : '');
 }
 
 function log(msg) {
@@ -897,16 +892,20 @@ async function apiFetch(path) {
 function showOverlay() { document.getElementById('loading-overlay').style.display = 'flex'; }
 function hideOverlay() { document.getElementById('loading-overlay').style.display = 'none'; }
 
+let isLoading = false;
+
 async function loadData() {
-  const year = activeTab; // always 2025 when this button is visible
+  if (isLoading) return;
+  const year = activeTab;
   const btn = document.getElementById('load-btn');
+  isLoading = true;
   btn.disabled = true;
   showOverlay();
 
   try {
     log('Fetching FBS team list...');
     setStatus('Loading team list...', 'loading');
-    const fbsTeamsRaw = await apiFetch(`/teams?classification=fbs`);
+    const fbsTeamsRaw = await apiFetch(`/teams?year=${year}&classification=fbs`);
 
     if (!fbsTeamsRaw || !fbsTeamsRaw.length) throw new Error('No FBS teams returned. Check your API key.');
 
@@ -965,7 +964,7 @@ async function loadData() {
 
     console.log(`[CFB DEBUG] Total raw games: ${allRaw.length}, completed FBS games: ${games.length}`);
 
-    if (!games.length) throw new Error(`No completed games found for ${year}. The season may not have data yet.`);
+    if (!games.length) throw new Error(`No completed games found for ${year} yet. Once Week 1 results are final, rankings will calculate.`);
 
     log('Fetching team stats...');
     setStatus('Loading stats...', 'loading');
@@ -985,6 +984,9 @@ async function loadData() {
     // Cache so switching tabs and back doesn't re-fetch
     dataCache[year] = { rankings, games };
 
+    // If the user flipped tabs mid-fetch, keep the data but don't clobber the view
+    if (year !== activeTab) { hideOverlay(); btn.disabled = false; isLoading = false; return; }
+
     allTeamData = rankings;
     renderTable(rankings);
     populateConfFilter(rankings);
@@ -992,10 +994,11 @@ async function loadData() {
 
     document.getElementById('top-stats-bar').style.display = 'flex';
     document.getElementById('legend-bar').style.display = 'flex';
-    setStatus(`Ranked ${rankings.length} FBS teams · ${year} season · ${games.length} games analyzed`, 'done');
+    setStatus(statusLine(year, rankings, games), 'done');
 
   } catch (err) {
     console.error(err);
+    if (year !== activeTab) { hideOverlay(); btn.disabled = false; isLoading = false; return; }
     setStatus('Error: ' + err.message, 'error');
     document.getElementById('table-container').innerHTML = `
       <div class="empty-state">
@@ -1007,6 +1010,7 @@ async function loadData() {
 
   hideOverlay();
   btn.disabled = false;
+  isLoading = false;
 }
 
 /* ============================================================
@@ -1226,9 +1230,16 @@ function computeRankings(games, fbsTeams, statsData, advStats, spRatings, teamMa
     sched:     0.10,
   };
 
+  // Early in a season nobody has 10 games yet, so scale against the most games
+  // any team has actually played (capped at 10). This keeps a Week 2 board from
+  // being uniformly crushed to ~15% of scale while still penalizing teams that
+  // have played fewer games than their peers.
+  const maxPlayed = Math.max(1, ...teams.map(t => t.totalGames));
+  const gameBaseline = Math.min(10, maxPlayed);
+
   teams.forEach(t => {
-    // Penalize teams with very few games (bowl eligibility safety valve)
-    const gameFactor = Math.min(1, t.totalGames / 10);
+    // Penalize teams with fewer games than the field (bowl eligibility safety valve)
+    const gameFactor = Math.min(1, t.totalGames / gameBaseline);
 
     t.piScore = (
       t.rawRecord_norm    * W.record +
@@ -1244,18 +1255,32 @@ function computeRankings(games, fbsTeams, statsData, advStats, spRatings, teamMa
     t.piScore = Math.round(t.piScore * 10) / 10;
   });
 
+  // Early in the season most of the field hasn't kicked off yet. A team with zero
+  // games has no signal, so hold it out of the board instead of ranking it at 0.
+  const played = teams.filter(t => t.totalGames > 0);
+  const unplayed = teams.length - played.length;
+  teams.length = 0;
+  teams.push(...played);
+  teams.unplayedCount = unplayed;
+
   // Sort by piScore desc
   teams.sort((a, b) => b.piScore - a.piScore);
 
   console.log(`[CFB DEBUG] Final ranked teams: ${teams.length}. Top 5: ${teams.slice(0,5).map(t => `${t.name} (${t.wins}-${t.losses}, ${t.piScore})`).join(', ')}`);
 
   // Assign rank and tier
+  // Tier cutoffs are proportional so a partially-played early-season board
+  // (16 ranked teams in Week 1) tiers the same way a full 138-team board does.
+  const n = teams.length;
+  const cut = f => Math.max(1, Math.round(n * f));
+  const c1 = cut(10 / 138), c2 = cut(25 / 138), c3 = cut(45 / 138), c4 = cut(75 / 138);
+
   teams.forEach((t, i) => {
     t.rank = i + 1;
-    if (i < 10) t.tier = 'elite';
-    else if (i < 25) t.tier = 'top10';
-    else if (i < 45) t.tier = 'contender';
-    else if (i < 75) t.tier = 'midmajor';
+    if (i < c1) t.tier = 'elite';
+    else if (i < c2) t.tier = 'top10';
+    else if (i < c3) t.tier = 'contender';
+    else if (i < c4) t.tier = 'midmajor';
     else t.tier = 'fringe';
   });
 
@@ -1391,6 +1416,8 @@ function populateConfFilter(data) {
 
 function updateTopStats(rankings, games) {
   document.getElementById('ts-teams').textContent = rankings.length;
+  document.querySelector('#ts-teams').nextElementSibling.textContent =
+    rankings.unplayedCount ? `of ${rankings.length + rankings.unplayedCount} · rest yet to play` : 'FBS Programs';
   document.getElementById('ts-one').textContent = rankings[0]?.name || '—';
   document.getElementById('ts-one-score').textContent = `PI Score: ${rankings[0]?.piScore || '—'}`;
   const avg = rankings.reduce((s, t) => s + t.piScore, 0) / rankings.length;
@@ -1455,6 +1482,9 @@ function closeDetail() {
 
 // Close panel on ESC
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
+
+// Boot straight into the current season
+switchTab(CURRENT_SEASON);
 </script>
 </body>
 </html>
