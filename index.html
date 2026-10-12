@@ -669,6 +669,34 @@
   .game-item .score-text { white-space: nowrap; }
   .game-item.win .score-text { color: var(--accent2); }
   .game-item.loss .score-text { color: var(--danger); }
+  .game-item .credit { color: var(--muted); white-space: nowrap; }
+
+  /* SCORE BREAKDOWN */
+  .bd-note {
+    font-family: var(--mono);
+    font-size: 10px;
+    line-height: 1.5;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  .bd-row { padding: 8px 0; border-bottom: 1px solid var(--border); }
+
+  .bd-head, .bd-sub {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    font-family: var(--mono);
+  }
+
+  .bd-label { font-size: 11px; color: var(--text); letter-spacing: 0.5px; }
+  .bd-pts { font-size: 13px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+  .bd-max { font-size: 10px; font-weight: 400; color: var(--muted); }
+  .bd-sub { font-size: 10px; color: var(--muted); }
+
+  .bd-bar { height: 3px; background: var(--surface2); margin: 6px 0; }
+  .bd-fill { height: 100%; background: var(--accent); }
 
   @media (max-width: 768px) {
     header, .controls, .legend, .table-wrapper, #status-bar, .top-stats { padding-left: 16px; padding-right: 16px; }
@@ -966,20 +994,10 @@ async function loadData() {
 
     if (!games.length) throw new Error(`No completed games found for ${year} yet. Once Week 1 results are final, rankings will calculate.`);
 
-    log('Fetching team stats...');
-    setStatus('Loading stats...', 'loading');
-    const statsData = await apiFetch(`/stats/season?year=${year}&seasonType=both`).catch(() => []);
-
-    log('Fetching advanced stats...');
-    const advStats = await apiFetch(`/stats/season/advanced?year=${year}&excludeGarbageTime=true`).catch(() => []);
-
-    log('Fetching SP+ ratings...');
-    const spRatings = await apiFetch(`/ratings/sp?year=${year}`).catch(() => []);
-
     log('Computing power rankings...');
     setStatus('Computing rankings...', 'loading');
     console.log(`[CFB DEBUG] FBS teams: ${fbsTeams.length}, games with scores: ${games.length}`);
-    const rankings = computeRankings(games, fbsTeams, statsData, advStats, spRatings, teamMap, year);
+    const rankings = computeRankings(games, fbsTeams);
 
     // Cache so switching tabs and back doesn't re-fetch
     dataCache[year] = { rankings, games };
@@ -1017,21 +1035,61 @@ async function loadData() {
    RANKING ALGORITHM
    ============================================================
 
-   Components (weights sum to 100%):
-   1. Win-loss record (15%) — raw W/L ratio with game count bonus
-   2. Strength-adjusted record (35%) — each W/L weighted by opponent strength
-   3. Scoring margin adjusted (15%) — PPG - OppPPG, capped to prevent blowout farming
-   4. Offensive efficiency (10%) — points per drive / yards per play concepts
-   5. Defensive efficiency (10%) — opponent PPG and yards allowed
-   6. Consistency / close-game performance (5%) — performance in <7pt games
-   7. Schedule strength (10%) — average opponent composite rating
+   Built from final scores only — no polls, no SP+, no outside ratings.
 
-   Opponent strength is computed iteratively (3 passes) so that
-   beating a team that beat good teams is worth more than beating
-   a team that stomped cupcakes.
+   1. Game results (90%) — every game earns or costs points based on the
+      opponent's record:
+        win  = +50 to +100  (more for beating a team with a better record)
+        loss = -40 to -120  (less for losing to a team with a better record)
+      then adjusted for the opponent's level: a win over a Power Four team is
+      bumped up, a win over anyone else is marked down, and a loss to a
+      non-P4 team costs more.
+      The per-game average is then multiplied by a factor from the team's own
+      winning percentage (WIN_PCT_FLOOR for a winless team, 1.0 for unbeaten).
+   2. Adjusted offense (5%) — points scored vs. what each opponent usually allows
+   3. Adjusted defense (5%) — points allowed vs. what each opponent usually scores
+
+   Scoring margin, schedule strength and close-game record are tracked and
+   displayed but do not count toward the score.
+
+   Every component is a per-game rate, so a bye week doesn't move a team.
 */
-function computeRankings(games, fbsTeams, statsData, advStats, spRatings, teamMap, year) {
+const signed = v => (v >= 0 ? '+' : '') + v.toFixed(1);
+
+// Power Four opponents. Notre Dame is an independent but plays a P4 schedule.
+const P4_CONFERENCES = new Set(['SEC', 'Big Ten', 'ACC', 'Big 12']);
+const P4_INDEPENDENTS = new Set(['Notre Dame']);
+const isP4 = t => !!t && (P4_CONFERENCES.has(t.conference) || P4_INDEPENDENTS.has(t.school));
+
+// Opponent-level adjustments to a game's points
+const P4_WIN_BONUS = 1.15;        // beating a P4 team is worth more
+const NON_P4_WIN_FACTOR = 0.85;   // beating anyone else is worth less
+const NON_P4_LOSS_FACTOR = 1.25;  // losing to a non-P4 team hurts more
+
+// Points for one game, given the opponent's winning percentage (0-1) and level
+const winPoints  = (oppPct, oppP4) => (50 + 50 * oppPct) * (oppP4 ? P4_WIN_BONUS : NON_P4_WIN_FACTOR);
+const lossPoints = (oppPct, oppP4) => -(120 - 80 * oppPct) * (oppP4 ? 1 : NON_P4_LOSS_FACTOR);
+
+// Multiplier applied to a team's game-results points for its own winning percentage
+const WIN_PCT_FLOOR = 0.75;
+const winMultiplier = pct => WIN_PCT_FLOOR + (1 - WIN_PCT_FLOOR) * pct;
+
+const COMPONENTS = [
+  { key: 'results', label: 'Game Results',     weight: 0.90, get: t => t.pointsPerGame, mult: t => t.winMult, fmt: t => signed(t.pointsPerGame) + ' pts/gm' },
+  { key: 'offense', label: 'Adjusted Offense', weight: 0.05, get: t => t.adjOffense,    fmt: t => signed(t.adjOffense) + ' pts vs expected' },
+  { key: 'defense', label: 'Adjusted Defense', weight: 0.05, get: t => t.adjDefense,    fmt: t => signed(t.adjDefense) + ' pts vs expected' },
+];
+
+// FCS opponents are treated as a team with this winning percentage
+const FCS_STRENGTH = 0.25;
+
+// A team can trail the most-played team by this many games (byes, uneven
+// scheduling) with no effect on its score. Only a bigger gap gets scaled down.
+const BYE_ALLOWANCE = 2;
+
+function computeRankings(games, fbsTeams) {
   const fbsSet = new Set(fbsTeams.map(t => t.school));
+  const p4Set = new Set(fbsTeams.filter(isP4).map(t => t.school));
 
   // Build team game records — only for FBS teams
   const teamGames = {};
@@ -1039,56 +1097,41 @@ function computeRankings(games, fbsTeams, statsData, advStats, spRatings, teamMa
     teamGames[t.school] = { wins: [], losses: [], pointsFor: 0, pointsAgainst: 0, games: [], closeWins: 0, closeLosses: 0, closeGames: 0 };
   });
 
+  // League-wide scoring baselines, used when an opponent has no other games to judge it by
+  let allPts = 0, allCnt = 0, vsFcsFor = 0, vsFcsAgainst = 0, vsFcsCnt = 0;
+
+  const record = (team, opp, pf, pa) => {
+    const tg = teamGames[team];
+    if (!tg) return;
+    const win = pf > pa;
+    const isClose = Math.abs(pf - pa) <= 7;
+    const oppIsFBS = fbsSet.has(opp);
+    tg.games.push({ opp, pf, pa, win, oppIsFBS });
+    tg.pointsFor += pf;
+    tg.pointsAgainst += pa;
+    if (win) { tg.wins.push(opp); if (isClose) tg.closeWins++; }
+    else { tg.losses.push(opp); if (isClose) tg.closeLosses++; }
+    if (isClose) tg.closeGames++;
+    allPts += pf; allCnt++;
+    if (!oppIsFBS) { vsFcsFor += pf; vsFcsAgainst += pa; vsFcsCnt++; }
+  };
+
   games.forEach(g => {
-    const home = g.home_team, away = g.away_team;
     const hp = g.home_points, ap = g.away_points;
     if (hp === null || hp === undefined || ap === null || ap === undefined) return;
-    const margin = Math.abs(hp - ap);
-    const isClose = margin <= 7;
-
-    // Only record game results for FBS teams
-    if (teamGames[home]) {
-      const win = hp > ap;
-      teamGames[home].games.push({ opp: away, pf: hp, pa: ap, win, oppIsFBS: fbsSet.has(away) });
-      teamGames[home].pointsFor += hp;
-      teamGames[home].pointsAgainst += ap;
-      if (win) { teamGames[home].wins.push(away); if (isClose) teamGames[home].closeWins++; }
-      else { teamGames[home].losses.push(away); if (isClose) teamGames[home].closeLosses++; }
-      if (isClose) teamGames[home].closeGames++;
-    }
-
-    if (teamGames[away]) {
-      const win = ap > hp;
-      teamGames[away].games.push({ opp: home, pf: ap, pa: hp, win, oppIsFBS: fbsSet.has(home) });
-      teamGames[away].pointsFor += ap;
-      teamGames[away].pointsAgainst += hp;
-      if (win) { teamGames[away].wins.push(home); if (isClose) teamGames[away].closeWins++; }
-      else { teamGames[away].losses.push(home); if (isClose) teamGames[away].closeLosses++; }
-      if (isClose) teamGames[away].closeGames++;
-    }
+    record(g.home_team, g.away_team, hp, ap);
+    record(g.away_team, g.home_team, ap, hp);
   });
+
+  const leagueAvg = allCnt ? allPts / allCnt : 0;
+  const fcsAllows = vsFcsCnt ? vsFcsFor / vsFcsCnt : leagueAvg;      // what FCS teams give up to FBS teams
+  const fcsScores = vsFcsCnt ? vsFcsAgainst / vsFcsCnt : leagueAvg;  // what FCS teams score on FBS teams
 
   // Debug: check a known team
   const sample = fbsTeams[0]?.school;
   if (sample) console.log(`[CFB DEBUG] Sample team "${sample}":`, teamGames[sample]);
 
-  // Build stats lookup
-  const statLookup = {};
-  statsData.forEach(s => {
-    if (!statLookup[s.team]) statLookup[s.team] = {};
-    statLookup[s.team][s.statName] = s.statValue;
-  });
-
-  const advLookup = {};
-  advStats.forEach(s => {
-    if (!advLookup[s.team]) advLookup[s.team] = {};
-    Object.assign(advLookup[s.team], s);
-  });
-
-  const spLookup = {};
-  spRatings.forEach(s => { spLookup[s.team] = s; });
-
-  // PASS 1: raw win pct (FBS teams only)
+  // Raw win pct (FBS teams only)
   const rawWinPct = {};
   fbsTeams.forEach(t => {
     const tg = teamGames[t.school];
@@ -1096,68 +1139,50 @@ function computeRankings(games, fbsTeams, statsData, advStats, spRatings, teamMa
     rawWinPct[t.school] = total > 0 ? tg.wins.length / total : 0.5;
   });
 
-  // FCS opponents get a fixed low strength rating so they count but don't inflate SOS
-  const FCS_STRENGTH = 0.25;
+  // An opponent's strength is simply its record
+  const strengthOf = opp => fbsSet.has(opp) ? rawWinPct[opp] : FCS_STRENGTH;
 
-  // PASS 2: opponent-adjusted win pct (iterate 3x)
-  // FCS opponents use FCS_STRENGTH constant; FBS opponents use their computed value
-  let oppAdjWinPct = { ...rawWinPct };
-  for (let iter = 0; iter < 3; iter++) {
-    const newPct = {};
-    fbsTeams.forEach(t => {
-      const tg = teamGames[t.school];
-      let weightedWins = 0, weightedLosses = 0;
-
-      tg.wins.forEach(opp => {
-        const oppStr = fbsSet.has(opp) ? (oppAdjWinPct[opp] ?? 0.4) : FCS_STRENGTH;
-        weightedWins += 0.5 + oppStr * 0.5;
-      });
-
-      tg.losses.forEach(opp => {
-        const oppStr = fbsSet.has(opp) ? (oppAdjWinPct[opp] ?? 0.4) : FCS_STRENGTH;
-        weightedLosses += 1.2 - oppStr * 0.8;
-      });
-
-      const total = weightedWins + weightedLosses;
-      newPct[t.school] = total > 0 ? weightedWins / total : 0.5;
-    });
-    oppAdjWinPct = newPct;
-  }
-
-  // Schedule strength — FCS opponents penalized with low fixed value
+  // Schedule strength — average opponent winning percentage (display only)
   const schedStr = {};
   fbsTeams.forEach(t => {
     const tg = teamGames[t.school];
     const opps = [...tg.wins, ...tg.losses];
     if (opps.length === 0) { schedStr[t.school] = 0.5; return; }
-    const avg = opps.reduce((s, o) => s + (fbsSet.has(o) ? (oppAdjWinPct[o] ?? 0.4) : FCS_STRENGTH), 0) / opps.length;
-    schedStr[t.school] = avg;
+    schedStr[t.school] = opps.reduce((s, o) => s + strengthOf(o), 0) / opps.length;
   });
 
-  // Normalize a value 0-1 within an array
-  function normalize(vals, key) {
-    const arr = vals.map(v => v[key]).filter(x => isFinite(x));
-    if (!arr.length) return;
-    const min = Math.min(...arr), max = Math.max(...arr);
-    const range = max - min || 1;
-    vals.forEach(v => { v[key + '_norm'] = isFinite(v[key]) ? (v[key] - min) / range : 0.5; });
-  }
-
-  // Build team objects
-  const teams = fbsTeams.map(t => {
+  // Build team objects. A team with zero games has no signal, so it is held out
+  // here — before normalizing — instead of setting the floor/ceiling for everyone else.
+  const teams = fbsTeams.filter(t => teamGames[t.school].games.length > 0).map(t => {
     const name = t.school;
-    const tg = teamGames[name] || { wins: [], losses: [], pointsFor: 0, pointsAgainst: 0, games: [], closeWins: 0, closeLosses: 0, closeGames: 0 };
-    const totalGames = tg.wins.length + tg.losses.length;
-    const st = statLookup[name] || {};
-    const av = advLookup[name] || {};
-    const sp = spLookup[name] || {};
+    const tg = teamGames[name];
+    const totalGames = tg.games.length;
 
-    const ppg = totalGames > 0 ? tg.pointsFor / totalGames : 0;
-    const oppPpg = totalGames > 0 ? tg.pointsAgainst / totalGames : 0;
+    const ppg = tg.pointsFor / totalGames;
+    const oppPpg = tg.pointsAgainst / totalGames;
     const marginPerGame = ppg - oppPpg;
-    const cappedMargin = Math.max(-20, Math.min(20, marginPerGame));
 
     const closeWinPct = tg.closeGames > 0 ? tg.closeWins / tg.closeGames : 0.5;
+
+    // Per-game detail: the points each result earned, and how the score compared
+    // with what that opponent does in its other games.
+    let offSum = 0, defSum = 0;
+    tg.games.forEach(g => {
+      const og = teamGames[g.opp];
+      g.oppStr = strengthOf(g.opp);
+      g.oppRecord = g.oppIsFBS ? `${og.wins.length}-${og.losses.length}` : 'FCS';
+      g.oppP4 = p4Set.has(g.opp);
+      g.credit = g.win ? winPoints(g.oppStr, g.oppP4) : lossPoints(g.oppStr, g.oppP4);
+
+      const others = og ? og.games.length - 1 : 0;
+      if (!g.oppIsFBS) { g.expFor = fcsAllows; g.expAgainst = fcsScores; }
+      else if (others > 0) {
+        g.expFor = (og.pointsAgainst - g.pf) / others;
+        g.expAgainst = (og.pointsFor - g.pa) / others;
+      } else { g.expFor = leagueAvg; g.expAgainst = leagueAvg; }
+      offSum += g.pf - g.expFor;
+      defSum += g.expAgainst - g.pa;
+    });
 
     // Combined W-L record of teams this team BEAT (FBS opponents only)
     let oppWins = 0, oppLosses = 0;
@@ -1178,90 +1203,56 @@ function computeRankings(games, fbsTeams, statsData, advStats, spRatings, teamMa
       ppg,
       oppPpg,
       marginPerGame,
-      cappedMargin,
+      pointsPerGame: tg.games.reduce((s, g) => s + g.credit, 0) / totalGames,
+      winMult: winMultiplier(rawWinPct[name]),
+      adjOffense: offSum / totalGames,
+      adjDefense: defSum / totalGames,
       closeWinPct,
       closeWins: tg.closeWins,
       closeLosses: tg.closeLosses,
       closeGames: tg.closeGames,
       winPct: rawWinPct[name],
-      oppAdjWinPct: oppAdjWinPct[name],
       schedStr: schedStr[name],
       oppWins,
       oppLosses,
       games: tg.games,
-      spRating: sp.rating ?? null,
-      rawRecord: 0,
-      rawAdjRecord: 0,
-      rawMargin: 0,
-      rawSched: 0,
-      rawClose: 0,
-      rawOffense: 0,
-      rawDefense: 0,
     };
   });
+  teams.unplayedCount = fbsTeams.length - teams.length;
 
-  // Normalize components
-  teams.forEach(t => {
-    t.rawRecord    = t.winPct;
-    t.rawAdjRecord = t.oppAdjWinPct;
-    t.rawMargin    = t.cappedMargin;
-    t.rawSched     = t.schedStr;
-    t.rawClose     = t.closeWinPct;
-    t.rawOffense   = t.ppg;
-    t.rawDefense   = -t.oppPpg;
+  // Scale each component 0-1 across the ranked field and record where each team
+  // lands, so the detail panel can show exactly how a score was built.
+  teams.forEach(t => { t.breakdown = []; });
+  COMPONENTS.forEach(c => {
+    const vals = teams.map(c.get);
+    const min = Math.min(...vals), max = Math.max(...vals);
+    const range = max - min || 1;
+    teams.forEach(t => {
+      const norm = (c.get(t) - min) / range;
+      const mult = c.mult ? c.mult(t) : null;
+      t.breakdown.push({
+        key: c.key,
+        label: c.label,
+        weight: c.weight,
+        display: c.fmt(t),
+        norm,
+        mult,
+        points: norm * c.weight * 1000 * (mult ?? 1),
+        rank: vals.filter(v => v > c.get(t)).length + 1,  // tied teams share a rank
+      });
+    });
   });
 
-  normalize(teams, 'rawRecord');
-  normalize(teams, 'rawAdjRecord');
-  normalize(teams, 'rawMargin');
-  normalize(teams, 'rawSched');
-  normalize(teams, 'rawClose');
-  normalize(teams, 'rawOffense');
-  normalize(teams, 'rawDefense');
-
-  // Weighted composite
-  const W = {
-    record:    0.15,
-    adjRecord: 0.35,
-    margin:    0.15,
-    offense:   0.10,
-    defense:   0.10,
-    close:     0.05,
-    sched:     0.10,
-  };
-
-  // Early in a season nobody has 10 games yet, so scale against the most games
-  // any team has actually played (capped at 10). This keeps a Week 2 board from
-  // being uniformly crushed to ~15% of scale while still penalizing teams that
-  // have played fewer games than their peers.
   const maxPlayed = Math.max(1, ...teams.map(t => t.totalGames));
   const gameBaseline = Math.min(10, maxPlayed);
 
   teams.forEach(t => {
-    // Penalize teams with fewer games than the field (bowl eligibility safety valve)
-    const gameFactor = Math.min(1, t.totalGames / gameBaseline);
-
-    t.piScore = (
-      t.rawRecord_norm    * W.record +
-      t.rawAdjRecord_norm * W.adjRecord +
-      t.rawMargin_norm    * W.margin +
-      t.rawOffense_norm   * W.offense +
-      t.rawDefense_norm   * W.defense +
-      t.rawClose_norm     * W.close +
-      t.rawSched_norm     * W.sched
-    ) * gameFactor * 1000;
+    t.gameFactor = Math.min(1, (t.totalGames + BYE_ALLOWANCE) / gameBaseline);
+    t.subtotal = t.breakdown.reduce((s, b) => s + b.points, 0);
 
     // Round to 1 decimal
-    t.piScore = Math.round(t.piScore * 10) / 10;
+    t.piScore = Math.round(t.subtotal * t.gameFactor * 10) / 10;
   });
-
-  // Early in the season most of the field hasn't kicked off yet. A team with zero
-  // games has no signal, so hold it out of the board instead of ranking it at 0.
-  const played = teams.filter(t => t.totalGames > 0);
-  const unplayed = teams.length - played.length;
-  teams.length = 0;
-  teams.push(...played);
-  teams.unplayedCount = unplayed;
 
   // Sort by piScore desc
   teams.sort((a, b) => b.piScore - a.piScore);
@@ -1338,7 +1329,7 @@ function renderTable(data) {
     const closeRecord = t.closeGames > 0 ? `${t.closeWins}-${t.closeLosses}` : '—';
     const oppRec = (t.oppWins + t.oppLosses) > 0 ? `${t.oppWins}-${t.oppLosses}` : '—';
     const oppRecPct = (t.oppWins + t.oppLosses) > 0 ? t.oppWins / (t.oppWins + t.oppLosses) : 0;
-    const oppRecColor = oppRecPct >= 0.55 ? 'positive' : oppRecPct <= 0.40 ? 'negative' : '';
+    const oppRecColor = oppRec === '—' ? '' : oppRecPct >= 0.55 ? 'positive' : oppRecPct <= 0.40 ? 'negative' : '';
     const marginColor = t.marginPerGame >= 0 ? 'positive' : 'negative';
 
     html += `
@@ -1430,6 +1421,26 @@ function openDetail(teamName) {
   if (!t) return;
 
   const wl = `${t.wins}-${t.losses}`;
+  const fieldSize = allTeamData.length;
+
+  const breakdownRows = t.breakdown.map(b => `
+    <div class="bd-row">
+      <div class="bd-head">
+        <span class="bd-label">${b.label}</span>
+        <span class="bd-pts">${b.points.toFixed(1)}<span class="bd-max"> / ${(b.weight * 1000).toFixed(0)}</span></span>
+      </div>
+      <div class="bd-bar"><div class="bd-fill" style="width:${(b.norm * 100).toFixed(1)}%"></div></div>
+      <div class="bd-sub">
+        <span>${b.display} · #${b.rank} of ${fieldSize}</span>
+        <span>${(b.norm * 100).toFixed(0)} × ${(b.weight * 100).toFixed(0)}%${b.mult !== null ? ` × ${b.mult.toFixed(3)}` : ''}</span>
+      </div>
+    </div>`).join('');
+
+  const factorRow = t.gameFactor < 1
+    ? `<div class="detail-stat-row"><span class="detail-stat-label">Subtotal</span><span class="detail-stat-val">${t.subtotal.toFixed(1)}</span></div>
+       <div class="detail-stat-row"><span class="detail-stat-label">Games Played Factor (${t.totalGames} gms)</span><span class="detail-stat-val">× ${t.gameFactor.toFixed(2)}</span></div>`
+    : '';
+
   const sortedGames = [...t.games].sort((a, b) => {
     if (a.win && !b.win) return -1;
     if (!a.win && b.win) return 1;
@@ -1440,7 +1451,8 @@ function openDetail(teamName) {
     const result = g.win ? 'W' : 'L';
     const score = `${result} ${g.pf}-${g.pa}`;
     return `<div class="game-item ${g.win ? 'win' : 'loss'}">
-      <span class="opp">vs ${g.opp}</span>
+      <span class="opp">vs ${g.opp} (${g.oppIsFBS ? `${g.oppP4 ? 'P4' : 'G5'} ${g.oppRecord}` : 'FCS'})</span>
+      <span class="credit">${g.credit >= 0 ? '+' : '−'}${Math.abs(g.credit).toFixed(1)} pts</span>
       <span class="score-text">${score}</span>
     </div>`;
   }).join('');
@@ -1450,24 +1462,33 @@ function openDetail(teamName) {
     <div class="detail-team">${t.name}</div>
     <div class="detail-meta">${t.conference} · ${wl} · <span class="tier-badge tier-${t.tier}">${tierLabel(t.tier)}</span></div>
 
-    <div class="detail-section-title">Power Index Breakdown</div>
+    <div class="detail-section-title">How This Ranking Was Built</div>
+    <div class="bd-note">Each component is scaled 0–100 against the field (best team = 100, worst = 0), then multiplied by its weight. Game Results is also multiplied by a win % factor (${WIN_PCT_FLOOR.toFixed(2)} winless → 1.00 unbeaten). Points add up to the Power Index, max 1000.</div>
+    ${breakdownRows}
+    ${factorRow}
     <div class="detail-stat-row"><span class="detail-stat-label">PI Score</span><span class="detail-stat-val" style="color:var(--accent)">${t.piScore}</span></div>
+
+    <div class="detail-section-title">Record &amp; Schedule</div>
     <div class="detail-stat-row"><span class="detail-stat-label">Record</span><span class="detail-stat-val">${wl}</span></div>
     <div class="detail-stat-row"><span class="detail-stat-label">Win %</span><span class="detail-stat-val">${(t.winPct * 100).toFixed(1)}%</span></div>
-    <div class="detail-stat-row"><span class="detail-stat-label">Adj. Win % (SOS-weighted)</span><span class="detail-stat-val">${(t.oppAdjWinPct * 100).toFixed(1)}%</span></div>
-    <div class="detail-stat-row"><span class="detail-stat-label">Schedule Strength</span><span class="detail-stat-val">${(t.schedStr * 100).toFixed(1)}</span></div>
+    <div class="detail-stat-row"><span class="detail-stat-label">Win % Multiplier</span><span class="detail-stat-val">× ${t.winMult.toFixed(3)}</span></div>
+    <div class="detail-stat-row"><span class="detail-stat-label">Game Points Per Game</span><span class="detail-stat-val">${signed(t.pointsPerGame)}</span></div>
+    <div class="detail-stat-row"><span class="detail-stat-label">Opponent Win % (not scored)</span><span class="detail-stat-val">${(t.schedStr * 100).toFixed(1)}</span></div>
     <div class="detail-stat-row"><span class="detail-stat-label">Wins Opp Record</span><span class="detail-stat-val">${t.oppWins}-${t.oppLosses}</span></div>
 
     <div class="detail-section-title">Scoring</div>
     <div class="detail-stat-row"><span class="detail-stat-label">Points Per Game</span><span class="detail-stat-val">${t.ppg.toFixed(1)}</span></div>
     <div class="detail-stat-row"><span class="detail-stat-label">Opp Points Per Game</span><span class="detail-stat-val">${t.oppPpg.toFixed(1)}</span></div>
-    <div class="detail-stat-row"><span class="detail-stat-label">Scoring Margin</span><span class="detail-stat-val" style="color:${t.marginPerGame >= 0 ? 'var(--accent2)' : 'var(--danger)'}">${t.marginPerGame >= 0 ? '+' : ''}${t.marginPerGame.toFixed(1)}</span></div>
+    <div class="detail-stat-row"><span class="detail-stat-label">Scoring Margin</span><span class="detail-stat-val" style="color:${t.marginPerGame >= 0 ? 'var(--accent2)' : 'var(--danger)'}">${signed(t.marginPerGame)}</span></div>
+    <div class="detail-stat-row"><span class="detail-stat-label">Offense vs Expected</span><span class="detail-stat-val" style="color:${t.adjOffense >= 0 ? 'var(--accent2)' : 'var(--danger)'}">${signed(t.adjOffense)}</span></div>
+    <div class="detail-stat-row"><span class="detail-stat-label">Defense vs Expected</span><span class="detail-stat-val" style="color:${t.adjDefense >= 0 ? 'var(--accent2)' : 'var(--danger)'}">${signed(t.adjDefense)}</span></div>
 
-    <div class="detail-section-title">Close Games (≤7 pts)</div>
+    <div class="detail-section-title">Close Games (≤7 pts) · Not Scored</div>
     <div class="detail-stat-row"><span class="detail-stat-label">Close Game Record</span><span class="detail-stat-val">${t.closeWins}-${t.closeLosses}</span></div>
     <div class="detail-stat-row"><span class="detail-stat-label">Close Win %</span><span class="detail-stat-val">${t.closeGames > 0 ? (t.closeWinPct * 100).toFixed(0) + '%' : 'N/A'}</span></div>
 
     <div class="detail-section-title">Game Log</div>
+    <div class="bd-note">Opponent's level and record in brackets. A win earns +50 to +100 and a loss costs −40 to −120, depending on that record. P4 wins are then ×${P4_WIN_BONUS}, other wins ×${NON_P4_WIN_FACTOR}, and non-P4 losses ×${NON_P4_LOSS_FACTOR}. Game Results is the average of these.</div>
     <div class="games-list">${gameRows || '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);padding:8px">No games found</div>'}</div>
   `;
 
